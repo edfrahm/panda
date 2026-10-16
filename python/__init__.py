@@ -129,6 +129,7 @@ class Panda:
 
   # from https://github.com/commaai/openpilot/blob/103b4df18cbc38f4129555ab8b15824d1a672bdf/cereal/log.capnp#L648
   HW_TYPE_UNKNOWN = b'\x00'
+  HW_TYPE_DOS = b'\x06'
   HW_TYPE_RED_PANDA = b'\x07'
   HW_TYPE_TRES = b'\x09'
   HW_TYPE_CUATRO = b'\x0a'
@@ -147,10 +148,11 @@ class Panda:
   HEALTH_FLAG_SAFETY_RX_CHECKS_INVALID = 1 << 5
   HEALTH_FLAG_SOM_RESET_TRIGGERED = 1 << 6
 
+  F4_DEVICES = [HW_TYPE_DOS, ]
   H7_DEVICES = [HW_TYPE_RED_PANDA, HW_TYPE_TRES, HW_TYPE_CUATRO, HW_TYPE_BODY]
-  SUPPORTED_DEVICES = H7_DEVICES
+  SUPPORTED_DEVICES = F4_DEVICES + H7_DEVICES
 
-  INTERNAL_DEVICES = (HW_TYPE_TRES, HW_TYPE_CUATRO)
+  INTERNAL_DEVICES = (HW_TYPE_DOS, HW_TYPE_TRES, HW_TYPE_CUATRO)
 
   HARNESS_STATUS_NC = 0
   HARNESS_STATUS_NORMAL = 1
@@ -161,6 +163,8 @@ class Panda:
 
     self._handle: BaseHandle
     self._handle_open = False
+    self._bcd_hw_type: bytes | None = None
+    self._mcu_type = McuType.H7
     self.can_rx_overflow_buffer = b''
     self._can_speed_kbps = can_speed_kbps
 
@@ -225,6 +229,7 @@ class Panda:
     self._serial = serial
     self._connect_serial = serial
     self._handle_open = True
+    self._mcu_type = self._detect_mcu_type()
     self.health_version, self.can_version = self.get_packets_versions()
     logger.debug("connected")
 
@@ -443,7 +448,7 @@ class Panda:
       return
 
     if not fn:
-      fn = os.path.join(FW_PATH, McuType.H7.config.app_fn)
+      fn = os.path.join(FW_PATH, self._mcu_type.config.app_fn)
     assert os.path.isfile(fn)
     logger.debug("flash: main version is %s", self.get_version())
     if not self.bootstub:
@@ -458,7 +463,7 @@ class Panda:
     logger.debug("flash: bootstub version is %s", self.get_version())
 
     # do flash
-    Panda.flash_static(self._handle, code, mcu_type=McuType.H7)
+    Panda.flash_static(self._handle, code, mcu_type=self._mcu_type)
 
     # reconnect
     if reconnect:
@@ -509,7 +514,7 @@ class Panda:
   def up_to_date(self, fn=None) -> bool:
     current = self.get_signature()
     if fn is None:
-      fn = os.path.join(FW_PATH, McuType.H7.config.app_fn)
+      fn = os.path.join(FW_PATH, self._mcu_type.config.app_fn)
     expected = Panda.get_signature_from_firmware(fn)
     return (current == expected)
 
@@ -615,7 +620,36 @@ class Panda:
     return bytes(part_1 + part_2)
 
   def get_type(self):
-    return self._handle.controlRead(Panda.REQUEST_IN, 0xc1, 0, 0, 0x40)
+    ret = self._handle.controlRead(Panda.REQUEST_IN, 0xc1, 0, 0, 0x40)
+
+    # old comma 3 bootstubs don't implement this endpoint, see _detect_mcu_type
+    if self._bcd_hw_type is not None and (ret is None or len(ret) != 1):
+      ret = self._bcd_hw_type
+
+    return ret
+
+  def _detect_mcu_type(self) -> McuType:
+    # Fallback for old comma 3 (F4) bootstubs, so we know which firmware to flash:
+    # A) the oldest bootstubs have no way to tell the panda or MCU type
+    # B) slightly newer ones (~2 weeks after the first comma 3s were built) put the
+    #    panda type in the USB bcdDevice
+    # C) current ones implement the panda type endpoint
+    self._bcd_hw_type = None
+    ret = self._handle.controlRead(Panda.REQUEST_IN, 0xc1, 0, 0, 0x40)
+    missing_hw_type_endpoint = self.bootstub and ret.startswith(b'\xff\x00\xc1\x3e\xde\xad\xd0\x0d')
+    if missing_hw_type_endpoint and isinstance(self._handle, PandaUsbHandle):
+      # bcdDevice wasn't always set to the hw type, ignore if it's the old constant
+      bcd = self._handle.get_bcd_device()
+      if bcd is not None and bcd != 0x2300:
+        self._bcd_hw_type = bytes([bcd >> 8, ])
+
+    # For case A, assume F4, since all H7 pandas are case B at worst
+    if self.get_type() in Panda.F4_DEVICES or (missing_hw_type_endpoint and self._bcd_hw_type is None):
+      return McuType.F4
+    return McuType.H7
+
+  def get_mcu_type(self) -> McuType:
+    return self._mcu_type
 
   def get_packets_versions(self):
     dat = self._handle.controlRead(Panda.REQUEST_IN, 0xdd, 0, 0, 8)
@@ -643,7 +677,7 @@ class Panda:
     return self._serial
 
   def get_dfu_serial(self):
-    return PandaDFU.st_serial_to_dfu_serial(self._serial, McuType.H7)
+    return PandaDFU.st_serial_to_dfu_serial(self._serial, self._mcu_type)
 
   def get_uid(self):
     """

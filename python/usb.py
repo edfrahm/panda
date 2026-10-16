@@ -22,6 +22,9 @@ class PandaUsbHandle(BaseHandle):
   def bulkRead(self, endpoint: int, length: int, timeout: int = TIMEOUT) -> bytes:
     return self._libusb_handle.bulkRead(endpoint, length, timeout)  # type: ignore
 
+  def get_bcd_device(self) -> int | None:
+    return self._libusb_handle.getDevice().getbcdDevice()
+
 
 
 class STBootloaderUSBHandle(BaseSTBootloaderHandle):
