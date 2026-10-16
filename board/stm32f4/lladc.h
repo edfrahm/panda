@@ -1,6 +1,6 @@
-#include "lladc_declarations.h"
+#pragma once
 
-void register_set(volatile uint32_t *addr, uint32_t val, uint32_t mask);
+#include "lladc_declarations.h"
 
 void adc_init(ADC_TypeDef *adc) {
   register_set(&(ADC->CCR), ADC_CCR_TSVREFE | ADC_CCR_VBATE, 0xC30000U);

@@ -19,20 +19,34 @@ bool can_loopback = false;
   extern can_ring can_##x; \
   can_ring can_##x = { .w_ptr = 0, .r_ptr = 0, .fifo_size = (size), .elems = (CANPacket_t *)&(elems_##x) };
 
+#ifdef STM32F4
+// F4 has 256K + 64K of RAM for 72-byte packets: the RX queue fills the upper
+// half of SRAM1 (above the stack) and the TX queues fill SRAM2
+#define CAN_RX_BUFFER_SIZE 1792U
+#define CAN_TX_BUFFER_SIZE 256U
+#else
 #define CAN_RX_BUFFER_SIZE 4096U
 #define CAN_TX_BUFFER_SIZE 416U
+#endif
 
 #ifdef STM32H7
 // ITCM RAM and DTCM RAM are the fastest for Cortex-M7 core access
 __attribute__((section(".axisram"))) can_buffer(rx_q, CAN_RX_BUFFER_SIZE)
 __attribute__((section(".itcmram"))) can_buffer(tx1_q, CAN_TX_BUFFER_SIZE)
 __attribute__((section(".itcmram"))) can_buffer(tx2_q, CAN_TX_BUFFER_SIZE)
+#elif defined(STM32F4)
+__attribute__((section(".ram_hi"))) can_buffer(rx_q, CAN_RX_BUFFER_SIZE)
+__attribute__((section(".ram2"))) can_buffer(tx1_q, CAN_TX_BUFFER_SIZE)
+__attribute__((section(".ram2"))) can_buffer(tx2_q, CAN_TX_BUFFER_SIZE)
+__attribute__((section(".ram2"))) can_buffer(tx3_q, CAN_TX_BUFFER_SIZE)
 #else  // kept for PC
 can_buffer(rx_q, CAN_RX_BUFFER_SIZE)
 can_buffer(tx1_q, CAN_TX_BUFFER_SIZE)
 can_buffer(tx2_q, CAN_TX_BUFFER_SIZE)
 #endif
+#ifndef STM32F4
 can_buffer(tx3_q, CAN_TX_BUFFER_SIZE)
+#endif
 
 // FIXME:
 // cppcheck-suppress misra-c2012-9.3
@@ -122,6 +136,9 @@ bus_config_t bus_config[PANDA_CAN_CNT] = {
 void can_init_all(void) {
   for (uint8_t i=0U; i < PANDA_CAN_CNT; i++) {
     bus_config[i].canfd_enabled = false;
+    #ifdef STM32F4
+      bus_config[i].can_data_speed = 0U;  // bxCAN is classic CAN only
+    #endif
     can_clear(can_queues[i]);
     (void)can_init(i);
   }

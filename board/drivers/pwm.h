@@ -1,6 +1,10 @@
 #pragma once
 
+#ifdef STM32F4
+#define PWM_COUNTER_OVERFLOW 3840U // To get ~25kHz from the F4's 96MHz timer clock
+#else
 #define PWM_COUNTER_OVERFLOW 4800U // To get ~25kHz
+#endif
 
 // TODO: Implement for 32-bit timers
 

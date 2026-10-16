@@ -16,6 +16,7 @@ IGNORED_PATHS = (
   'board/obj',
   'board/body',
   'board/stm32h7/inc',
+  'board/stm32f4/inc',
   'board/fake_stm.h',
 
   # bootstub only files
@@ -23,11 +24,13 @@ IGNORED_PATHS = (
   'board/bootstub.c',
   'board/bootstub_declarations.h',
   'board/stm32h7/llflash.h',
+  'board/stm32f4/llflash.h',
 )
 
 mutations = [
   (None, None, False),  # no mods, should pass
   ("board/stm32h7/llfdcan.h", "s/return ret;/if (true) { return ret; } else { return false; }/g", True),
+  ("board/stm32f4/llbxcan.h", "s/return ret;/if (true) { return ret; } else { return false; }/g", True),
 ]
 
 patterns = [

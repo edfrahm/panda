@@ -1,17 +1,17 @@
-#include "bxcan_declarations.h"
+#pragma once
 
+#include "board/drivers/drivers.h"
+
+// bxCAN (STM32F4): classic CAN only, so at most 8 data bytes per frame
 // IRQs: CAN1_TX, CAN1_RX0, CAN1_SCE
 //       CAN2_TX, CAN2_RX0, CAN2_SCE
 //       CAN3_TX, CAN3_RX0, CAN3_SCE
 
-CAN_TypeDef *cans[CAN_ARRAY_SIZE] = {CAN1, CAN2, CAN3};
-uint8_t can_irq_number[CAN_IRQS_ARRAY_SIZE][CAN_IRQS_ARRAY_SIZE] = {
-  { CAN1_TX_IRQn, CAN1_RX0_IRQn, CAN1_SCE_IRQn },
-  { CAN2_TX_IRQn, CAN2_RX0_IRQn, CAN2_SCE_IRQn },
-  { CAN3_TX_IRQn, CAN3_RX0_IRQn, CAN3_SCE_IRQn },
-};
+#define BXCAN_DLC_MAX 8U
 
-bool can_set_speed(uint8_t can_number) {
+CAN_TypeDef *cans[PANDA_CAN_CNT] = {CAN1, CAN2, CAN3};
+
+static bool can_set_speed(uint8_t can_number) {
   bool ret = true;
   CAN_TypeDef *CANx = CANIF_FROM_CAN_NUM(can_number);
   uint8_t bus_number = BUS_NUM_FROM_CAN_NUM(can_number);
@@ -20,7 +20,7 @@ bool can_set_speed(uint8_t can_number) {
     CANx,
     bus_config[bus_number].can_speed,
     can_loopback,
-    (unsigned int)(can_silent) & (1U << can_number)
+    can_silent
   );
   return ret;
 }
@@ -31,6 +31,12 @@ void can_clear_send(CAN_TypeDef *CANx, uint8_t can_number) {
 }
 
 void update_can_health_pkt(uint8_t can_number, uint32_t ir_reg) {
+  uint8_t can_irq_number[PANDA_CAN_CNT][3] = {
+    { CAN1_TX_IRQn, CAN1_RX0_IRQn, CAN1_SCE_IRQn },
+    { CAN2_TX_IRQn, CAN2_RX0_IRQn, CAN2_SCE_IRQn },
+    { CAN3_TX_IRQn, CAN3_RX0_IRQn, CAN3_SCE_IRQn },
+  };
+
   CAN_TypeDef *CANx = CANIF_FROM_CAN_NUM(can_number);
   uint32_t esr_reg = CANx->ESR;
 
@@ -108,21 +114,30 @@ void process_can(uint8_t can_number) {
         CANx->TSR |= CAN_TSR_RQCP0;
       }
 
-      if (can_pop(can_queues[bus_number], &to_send)) {
-        if (can_check_checksum(&to_send)) {
-          can_health[can_number].total_tx_cnt += 1U;
-          // only send if we have received a packet
-          CANx->sTxMailBox[0].TIR = ((to_send.extended != 0U) ? (to_send.addr << 3) : (to_send.addr << 21)) | (to_send.extended << 2);
-          CANx->sTxMailBox[0].TDTR = to_send.data_len_code;
-          BYTE_ARRAY_TO_WORD(CANx->sTxMailBox[0].TDLR, &to_send.data[0]);
-          BYTE_ARRAY_TO_WORD(CANx->sTxMailBox[0].TDHR, &to_send.data[4]);
-          // Send request TXRQ
-          CANx->sTxMailBox[0].TIR |= 0x1U;
-        } else {
-          can_health[can_number].total_tx_checksum_error_cnt += 1U;
-        }
+      bool pop_next = true;
+      while (pop_next) {
+        pop_next = false;
+        if (can_pop(can_queues[bus_number], &to_send)) {
+          if (!can_check_checksum(&to_send)) {
+            can_health[can_number].total_tx_checksum_error_cnt += 1U;
+          } else if ((to_send.fd != 0U) || (to_send.data_len_code > BXCAN_DLC_MAX)) {
+            // CAN FD frames can't be sent on bxCAN: drop it and load the next one,
+            // since no TX complete interrupt will come for an empty mailbox
+            can_health[can_number].total_tx_lost_cnt += 1U;
+            pop_next = true;
+          } else {
+            can_health[can_number].total_tx_cnt += 1U;
+            // only send if we have received a packet
+            CANx->sTxMailBox[0].TIR = ((to_send.extended != 0U) ? (to_send.addr << 3) : (to_send.addr << 21)) | (to_send.extended << 2);
+            CANx->sTxMailBox[0].TDTR = to_send.data_len_code;
+            BYTE_ARRAY_TO_WORD(CANx->sTxMailBox[0].TDLR, &to_send.data[0]);
+            BYTE_ARRAY_TO_WORD(CANx->sTxMailBox[0].TDHR, &to_send.data[4]);
+            // Send request TXRQ
+            CANx->sTxMailBox[0].TIR |= 0x1U;
+          }
 
-        refresh_can_tx_slots_available();
+          refresh_can_tx_slots_available();
+        }
       }
     }
 
@@ -132,15 +147,12 @@ void process_can(uint8_t can_number) {
 
 // CANx_RX0 IRQ Handler
 // blink blue when we are receiving CAN messages
-void can_rx(uint8_t can_number) {
+static void can_rx(uint8_t can_number) {
   CAN_TypeDef *CANx = CANIF_FROM_CAN_NUM(can_number);
   uint8_t bus_number = BUS_NUM_FROM_CAN_NUM(can_number);
 
   while ((CANx->RF0R & CAN_RF0R_FMP0) != 0U) {
     can_health[can_number].total_rx_cnt += 1U;
-
-    // can is live
-    pending_can_live = 1;
 
     // add to my fifo
     CANPacket_t to_push;
@@ -150,21 +162,22 @@ void can_rx(uint8_t can_number) {
     to_push.rejected = 0U;
     to_push.extended = (CANx->sFIFOMailBox[0].RIR >> 2) & 0x1U;
     to_push.addr = (to_push.extended != 0U) ? (CANx->sFIFOMailBox[0].RIR >> 3) : (CANx->sFIFOMailBox[0].RIR >> 21);
-    to_push.data_len_code = CANx->sFIFOMailBox[0].RDTR & 0xFU;
+    // a classic CAN DLC above 8 still carries 8 bytes
+    to_push.data_len_code = MIN(CANx->sFIFOMailBox[0].RDTR & 0xFU, BXCAN_DLC_MAX);
     to_push.bus = bus_number;
     WORD_TO_BYTE_ARRAY(&to_push.data[0], CANx->sFIFOMailBox[0].RDLR);
     WORD_TO_BYTE_ARRAY(&to_push.data[4], CANx->sFIFOMailBox[0].RDHR);
     can_set_checksum(&to_push);
 
-    // forwarding (panda only)
+    // forwarding
     int bus_fwd_num = safety_fwd_hook(bus_number, to_push.addr);
-    if (bus_fwd_num != -1) {
+    if (bus_fwd_num >= 0) {
       CANPacket_t to_send;
 
       to_send.fd = 0U;
       to_send.returned = 0U;
       to_send.rejected = 0U;
-      to_send.extended = to_push.extended; // TXRQ
+      to_send.extended = to_push.extended;
       to_send.addr = to_push.addr;
       to_send.bus = to_push.bus;
       to_send.data_len_code = to_push.data_len_code;

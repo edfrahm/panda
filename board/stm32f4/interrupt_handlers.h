@@ -1,3 +1,5 @@
+#pragma once
+
 // ********************* Bare interrupt handlers *********************
 // Only implemented the STM32F413 interrupts for now
 

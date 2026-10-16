@@ -33,6 +33,8 @@
 ENTRY(Reset_Handler)
 
 /* Highest address of the user mode stack */
+/* The bootloader flag and stack top stay at the 128K boundary, where existing comma 3 bootstubs expect them.
+   .data/.bss/stack use the low 128K of SRAM1, large NOLOAD buffers go into RAM_HI (upper 128K) and RAM2. */
 enter_bootloader_mode = 0x2001FFFC;
 _estack = 0x2001FFFC;    /* end of 128K RAM on AHB bus*/
 _app_start = 0x08004000; /* Reserve Sector 0(16K) for bootloader */
@@ -45,7 +47,8 @@ _Min_Stack_Size = 0x400; /* required amount of stack */
 MEMORY
 {
   FLASH (rx)      : ORIGIN = 0x08000000, LENGTH = 1024K
-  RAM (xrw)       : ORIGIN = 0x20000000, LENGTH = 256K
+  RAM (xrw)       : ORIGIN = 0x20000000, LENGTH = 128K - 4
+  RAM_HI (xrw)    : ORIGIN = 0x20020000, LENGTH = 128K
   RAM2 (xrw)      : ORIGIN = 0x20040000, LENGTH = 64K
   MEMORY_B1 (rx)  : ORIGIN = 0x60000000, LENGTH = 0K
 }
@@ -151,6 +154,18 @@ SECTIONS
     . = . + _Min_Stack_Size;
     . = ALIGN(4);
   } >RAM
+
+  .ram_hi (NOLOAD) :
+  {
+    . = ALIGN(4);
+    *(.ram_hi*)
+  } >RAM_HI
+
+  .ram2 (NOLOAD) :
+  {
+    . = ALIGN(4);
+    *(.ram2*)
+  } >RAM2
 
   /* MEMORY_bank1 section, code must be located here explicitly            */
   /* Example: extern int foo(void) __attribute__ ((section (".mb1text"))); */

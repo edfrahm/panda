@@ -1,3 +1,5 @@
+#pragma once
+
 #ifdef BOOTSTUB
 void gpio_usb_init(void) {
 #else
@@ -11,14 +13,6 @@ static void gpio_usb_init(void) {
 
 void gpio_spi_init(void) {
 }
-
-#ifdef BOOTSTUB
-void gpio_usart2_init(void) {
-  // A2,A3: USART 2 for debugging
-  set_gpio_alternate(GPIOA, 2, GPIO_AF7_USART2);
-  set_gpio_alternate(GPIOA, 3, GPIO_AF7_USART2);
-}
-#endif
 
 // Common GPIO initialization
 void common_init_gpio(void) {
@@ -41,10 +35,7 @@ void common_init_gpio(void) {
 
 #ifdef BOOTSTUB
 void flasher_peripherals_init(void) {
-  RCC->AHB1ENR |= RCC_AHB1ENR_DMA2EN;
-  RCC->APB2ENR |= RCC_APB2ENR_SPI1EN;
   RCC->AHB2ENR |= RCC_AHB2ENR_OTGFSEN;
-  RCC->APB1ENR |= RCC_APB1ENR_USART2EN;
 }
 #endif
 
@@ -57,31 +48,25 @@ void peripherals_init(void) {
   RCC->AHB1ENR |= RCC_AHB1ENR_GPIODEN;
 
   // Supplemental
-  RCC->AHB1ENR |= RCC_AHB1ENR_DMA2EN;
-  RCC->APB1ENR |= RCC_APB1ENR_PWREN;   // for RTC config
+  RCC->APB1ENR |= RCC_APB1ENR_PWREN;
   RCC->APB2ENR |= RCC_APB2ENR_SYSCFGEN;
 
-  // Connectivity
-  RCC->APB2ENR |= RCC_APB2ENR_SPI1EN;
+  // Connectivity (USB to the SoM, no SPI or UART)
   RCC->AHB2ENR |= RCC_AHB2ENR_OTGFSEN;
-  RCC->APB1ENR |= RCC_APB1ENR_USART2EN;
-  RCC->APB1ENR |= RCC_APB1ENR_USART3EN;
-  RCC->APB1ENR |= RCC_APB1ENR_UART5EN;
   RCC->APB1ENR |= RCC_APB1ENR_CAN1EN;
   RCC->APB1ENR |= RCC_APB1ENR_CAN2EN;
   RCC->APB1ENR |= RCC_APB1ENR_CAN3EN;
 
   // Analog
   RCC->APB2ENR |= RCC_APB2ENR_ADC1EN;
-  RCC->APB1ENR |= RCC_APB1ENR_DACEN;
 
   // Timers
   RCC->APB2ENR |= RCC_APB2ENR_TIM1EN;  // clock source timer
   RCC->APB1ENR |= RCC_APB1ENR_TIM2EN;  // main counter
-  RCC->APB1ENR |= RCC_APB1ENR_TIM3EN;  // pedal and fan PWM
+  RCC->APB1ENR |= RCC_APB1ENR_TIM3EN;  // fan PWM
   RCC->APB1ENR |= RCC_APB1ENR_TIM4EN;  // IR PWM
-  RCC->APB1ENR |= RCC_APB1ENR_TIM5EN;  // k-line init
   RCC->APB1ENR |= RCC_APB1ENR_TIM6EN;  // interrupt timer
+  RCC->APB2ENR |= RCC_APB2ENR_TIM8EN;  // clock source slave timer (driver camera FSIN)
   RCC->APB2ENR |= RCC_APB2ENR_TIM9EN;  // slow loop
 }
 
