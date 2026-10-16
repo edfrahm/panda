@@ -135,7 +135,7 @@ base_project_f4 = {
     "-mhard-float",
     "-DSTM32F4",
     "-DSTM32F413xx",
-    "-Iboard/stm32f4/inc",
+    f"-I{Dir('./board/stm32f4/inc').abspath}",  # absolute, so it also resolves when built as a submodule
     "-mfpu=fpv4-sp-d16",
   ],
 }
