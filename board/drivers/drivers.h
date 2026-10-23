@@ -91,6 +91,12 @@ struct fan_state_t {
   uint16_t rpm;
   uint8_t power;
   uint8_t cooldown_counter;
+#ifdef STM32F4
+  uint8_t stall_counter;
+  uint8_t stall_threshold;
+  uint8_t start_power;
+  bool spun_up;
+#endif
 };
 extern struct fan_state_t fan_state;
 
